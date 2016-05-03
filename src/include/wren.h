@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#define DllExport __declspec(dllexport)
+
 // A single virtual machine for executing Wren code.
 //
 // Wren has no global state, so all state stored by a running interpreter lives
@@ -36,38 +38,38 @@ typedef struct WrenValue WrenValue;
 typedef void* (*WrenReallocateFn)(void* memory, size_t newSize);
 
 // A function callable from Wren code, but implemented in C.
-typedef void (*WrenForeignMethodFn)(WrenVM* vm);
+typedef void(*WrenForeignMethodFn)(WrenVM* vm);
 
 // A finalizer function for freeing resources owned by an instance of a foreign
 // class. Unlike most foreign methods, finalizers do not have access to the VM
 // and should not interact with it since it's in the middle of a garbage
 // collection.
-typedef void (*WrenFinalizerFn)(void* data);
+typedef void(*WrenFinalizerFn)(void* data);
 
 // Loads and returns the source code for the module [name].
 typedef char* (*WrenLoadModuleFn)(WrenVM* vm, const char* name);
 
 // Returns a pointer to a foreign method on [className] in [module] with
 // [signature].
-typedef WrenForeignMethodFn (*WrenBindForeignMethodFn)(WrenVM* vm,
-                                                       const char* module,
-                                                       const char* className,
-                                                       bool isStatic,
-                                                       const char* signature);
+typedef WrenForeignMethodFn(*WrenBindForeignMethodFn)(WrenVM* vm,
+	const char* module,
+	const char* className,
+	bool isStatic,
+	const char* signature);
 
 // Displays a string of text to the user.
-typedef void (*WrenWriteFn)(WrenVM* vm, const char* text);
+typedef void(*WrenWriteFn)(WrenVM* vm, const char* text);
 
 typedef enum
 {
-  // A syntax or resolution error detected at compile time.
-  WREN_ERROR_COMPILE,
-  
-  // The error message for a runtime error.
-  WREN_ERROR_RUNTIME,
-  
-  // One entry of a runtime error's stack trace.
-  WREN_ERROR_STACK_TRACE
+	// A syntax or resolution error detected at compile time.
+	WREN_ERROR_COMPILE,
+
+	// The error message for a runtime error.
+	WREN_ERROR_RUNTIME,
+
+	// One entry of a runtime error's stack trace.
+	WREN_ERROR_STACK_TRACE
 } WrenErrorType;
 
 // Reports an error to the user.
@@ -81,124 +83,124 @@ typedef enum
 // `WREN_ERROR_STACK_TRACE` calls are made for each line in the stack trace.
 // Each of those has the module and line where the method or function is
 // defined and [message] is the name of the method or function.
-typedef void (*WrenErrorFn)(
-    WrenErrorType type, const char* module, int line, const char* message);
+typedef void(*WrenErrorFn)(
+	WrenErrorType type, const char* module, int line, const char* message);
 
 typedef struct
 {
-  // The callback invoked when the foreign object is created.
-  //
-  // This must be provided. Inside the body of this, it must call
-  // [wrenAllocateForeign] exactly once.
-  WrenForeignMethodFn allocate;
+	// The callback invoked when the foreign object is created.
+	//
+	// This must be provided. Inside the body of this, it must call
+	// [wrenAllocateForeign] exactly once.
+	WrenForeignMethodFn allocate;
 
-  // The callback invoked when the garbage collector is about to collect a
-  // foreign object's memory.
-  //
-  // This may be `NULL` if the foreign class does not need to finalize.
-  WrenFinalizerFn finalize;
+	// The callback invoked when the garbage collector is about to collect a
+	// foreign object's memory.
+	//
+	// This may be `NULL` if the foreign class does not need to finalize.
+	WrenFinalizerFn finalize;
 } WrenForeignClassMethods;
 
 // Returns a pair of pointers to the foreign methods used to allocate and
 // finalize the data for instances of [className] in [module].
-typedef WrenForeignClassMethods (*WrenBindForeignClassFn)(
-    WrenVM* vm, const char* module, const char* className);
+typedef WrenForeignClassMethods(*WrenBindForeignClassFn)(
+	WrenVM* vm, const char* module, const char* className);
 
 typedef struct
 {
-  // The callback Wren will use to allocate, reallocate, and deallocate memory.
-  //
-  // If `NULL`, defaults to a built-in function that uses `realloc` and `free`.
-  WrenReallocateFn reallocateFn;
+	// The callback Wren will use to allocate, reallocate, and deallocate memory.
+	//
+	// If `NULL`, defaults to a built-in function that uses `realloc` and `free`.
+	WrenReallocateFn reallocateFn;
 
-  // The callback Wren uses to load a module.
-  //
-  // Since Wren does not talk directly to the file system, it relies on the
-  // embedder to phyisically locate and read the source code for a module. The
-  // first time an import appears, Wren will call this and pass in the name of
-  // the module being imported. The VM should return the soure code for that
-  // module. Memory for the source should be allocated using [reallocateFn] and
-  // Wren will take ownership over it.
-  //
-  // This will only be called once for any given module name. Wren caches the
-  // result internally so subsequent imports of the same module will use the
-  // previous source and not call this.
-  //
-  // If a module with the given name could not be found by the embedder, it
-  // should return NULL and Wren will report that as a runtime error.
-  WrenLoadModuleFn loadModuleFn;
+	// The callback Wren uses to load a module.
+	//
+	// Since Wren does not talk directly to the file system, it relies on the
+	// embedder to phyisically locate and read the source code for a module. The
+	// first time an import appears, Wren will call this and pass in the name of
+	// the module being imported. The VM should return the soure code for that
+	// module. Memory for the source should be allocated using [reallocateFn] and
+	// Wren will take ownership over it.
+	//
+	// This will only be called once for any given module name. Wren caches the
+	// result internally so subsequent imports of the same module will use the
+	// previous source and not call this.
+	//
+	// If a module with the given name could not be found by the embedder, it
+	// should return NULL and Wren will report that as a runtime error.
+	WrenLoadModuleFn loadModuleFn;
 
-  // The callback Wren uses to find a foreign method and bind it to a class.
-  //
-  // When a foreign method is declared in a class, this will be called with the
-  // foreign method's module, class, and signature when the class body is
-  // executed. It should return a pointer to the foreign function that will be
-  // bound to that method.
-  //
-  // If the foreign function could not be found, this should return NULL and
-  // Wren will report it as runtime error.
-  WrenBindForeignMethodFn bindForeignMethodFn;
+	// The callback Wren uses to find a foreign method and bind it to a class.
+	//
+	// When a foreign method is declared in a class, this will be called with the
+	// foreign method's module, class, and signature when the class body is
+	// executed. It should return a pointer to the foreign function that will be
+	// bound to that method.
+	//
+	// If the foreign function could not be found, this should return NULL and
+	// Wren will report it as runtime error.
+	WrenBindForeignMethodFn bindForeignMethodFn;
 
-  // The callback Wren uses to find a foreign class and get its foreign methods.
-  //
-  // When a foreign class is declared, this will be called with the class's
-  // module and name when the class body is executed. It should return the
-  // foreign functions uses to allocate and (optionally) finalize the bytes
-  // stored in the foreign object when an instance is created.
-  WrenBindForeignClassFn bindForeignClassFn;
+	// The callback Wren uses to find a foreign class and get its foreign methods.
+	//
+	// When a foreign class is declared, this will be called with the class's
+	// module and name when the class body is executed. It should return the
+	// foreign functions uses to allocate and (optionally) finalize the bytes
+	// stored in the foreign object when an instance is created.
+	WrenBindForeignClassFn bindForeignClassFn;
 
-  // The callback Wren uses to display text when `System.print()` or the other
-  // related functions are called.
-  //
-  // If this is `NULL`, Wren discards any printed text.
-  WrenWriteFn writeFn;
-  
-  // The callback Wren uses to report errors.
-  //
-  // When an error occurs, this will be called with the module name, line
-  // number, and an error message. If this is `NULL`, Wren doesn't report any
-  // errors.
-  WrenErrorFn errorFn;
+	// The callback Wren uses to display text when `System.print()` or the other
+	// related functions are called.
+	//
+	// If this is `NULL`, Wren discards any printed text.
+	WrenWriteFn writeFn;
 
-  // The number of bytes Wren will allocate before triggering the first garbage
-  // collection.
-  //
-  // If zero, defaults to 10MB.
-  size_t initialHeapSize;
+	// The callback Wren uses to report errors.
+	//
+	// When an error occurs, this will be called with the module name, line
+	// number, and an error message. If this is `NULL`, Wren doesn't report any
+	// errors.
+	WrenErrorFn errorFn;
 
-  // After a collection occurs, the threshold for the next collection is
-  // determined based on the number of bytes remaining in use. This allows Wren
-  // to shrink its memory usage automatically after reclaiming a large amount
-  // of memory.
-  //
-  // This can be used to ensure that the heap does not get too small, which can
-  // in turn lead to a large number of collections afterwards as the heap grows
-  // back to a usable size.
-  //
-  // If zero, defaults to 1MB.
-  size_t minHeapSize;
+	// The number of bytes Wren will allocate before triggering the first garbage
+	// collection.
+	//
+	// If zero, defaults to 10MB.
+	size_t initialHeapSize;
 
-  // Wren will resize the heap automatically as the number of bytes
-  // remaining in use after a collection changes. This number determines the
-  // amount of additional memory Wren will use after a collection, as a
-  // percentage of the current heap size.
-  //
-  // For example, say that this is 50. After a garbage collection, when there
-  // are 400 bytes of memory still in use, the next collection will be triggered 
-  // after a total of 600 bytes are allocated (including the 400 already in use.)
-  //
-  // Setting this to a smaller number wastes less memory, but triggers more
-  // frequent garbage collections.
-  //
-  // If zero, defaults to 50.
-  int heapGrowthPercent;
+	// After a collection occurs, the threshold for the next collection is
+	// determined based on the number of bytes remaining in use. This allows Wren
+	// to shrink its memory usage automatically after reclaiming a large amount
+	// of memory.
+	//
+	// This can be used to ensure that the heap does not get too small, which can
+	// in turn lead to a large number of collections afterwards as the heap grows
+	// back to a usable size.
+	//
+	// If zero, defaults to 1MB.
+	size_t minHeapSize;
+
+	// Wren will resize the heap automatically as the number of bytes
+	// remaining in use after a collection changes. This number determines the
+	// amount of additional memory Wren will use after a collection, as a
+	// percentage of the current heap size.
+	//
+	// For example, say that this is 50. After a garbage collection, when there
+	// are 400 bytes of memory still in use, the next collection will be triggered
+	// after a total of 600 bytes are allocated (including the 400 already in use.)
+	//
+	// Setting this to a smaller number wastes less memory, but triggers more
+	// frequent garbage collections.
+	//
+	// If zero, defaults to 50.
+	int heapGrowthPercent;
 } WrenConfiguration;
 
 typedef enum
 {
-  WREN_RESULT_SUCCESS,
-  WREN_RESULT_COMPILE_ERROR,
-  WREN_RESULT_RUNTIME_ERROR
+	WREN_RESULT_SUCCESS,
+	WREN_RESULT_COMPILE_ERROR,
+	WREN_RESULT_RUNTIME_ERROR
 } WrenInterpretResult;
 
 // The type of an object stored in a slot.
@@ -207,37 +209,37 @@ typedef enum
 // representation type.
 typedef enum
 {
-  WREN_TYPE_BOOL,
-  WREN_TYPE_NUM,
-  WREN_TYPE_FOREIGN,
-  WREN_TYPE_LIST,
-  WREN_TYPE_NULL,
-  WREN_TYPE_STRING,
-  
-  // The object is of a type that isn't accessible by the C API.
-  WREN_TYPE_UNKNOWN
+	WREN_TYPE_BOOL,
+	WREN_TYPE_NUM,
+	WREN_TYPE_FOREIGN,
+	WREN_TYPE_LIST,
+	WREN_TYPE_NULL,
+	WREN_TYPE_STRING,
+
+	// The object is of a type that isn't accessible by the C API.
+	WREN_TYPE_UNKNOWN
 } WrenType;
 
 // Initializes [configuration] with all of its default values.
 //
 // Call this before setting the particular fields you care about.
-void wrenInitConfiguration(WrenConfiguration* configuration);
+DllExport void wrenInitConfiguration(WrenConfiguration* configuration);
 
 // Creates a new Wren virtual machine using the given [configuration]. Wren
 // will copy the configuration data, so the argument passed to this can be
 // freed after calling this. If [configuration] is `NULL`, uses a default
 // configuration.
-WrenVM* wrenNewVM(WrenConfiguration* configuration);
+DllExport WrenVM* wrenNewVM(WrenConfiguration* configuration);
 
 // Disposes of all resources is use by [vm], which was previously created by a
 // call to [wrenNewVM].
-void wrenFreeVM(WrenVM* vm);
+DllExport void wrenFreeVM(WrenVM* vm);
 
 // Immediately run the garbage collector to free unused memory.
-void wrenCollectGarbage(WrenVM* vm);
+DllExport void wrenCollectGarbage(WrenVM* vm);
 
 // Runs [source], a string of Wren source code in a new fiber in [vm].
-WrenInterpretResult wrenInterpret(WrenVM* vm, const char* source);
+DllExport WrenInterpretResult wrenInterpret(WrenVM* vm, const char* source);
 
 // Creates a handle that can be used to invoke a method with [signature] on
 // using a receiver and arguments that are set up on the stack.
@@ -247,7 +249,7 @@ WrenInterpretResult wrenInterpret(WrenVM* vm, const char* source);
 //
 // When you are done with this handle, it must be released using
 // [wrenReleaseValue].
-WrenValue* wrenMakeCallHandle(WrenVM* vm, const char* signature);
+DllExport WrenValue* wrenMakeCallHandle(WrenVM* vm, const char* signature);
 
 // Calls [method], using the receiver and arguments previously set up on the
 // stack.
@@ -259,11 +261,11 @@ WrenValue* wrenMakeCallHandle(WrenVM* vm, const char* signature);
 // signature.
 //
 // After this returns, you can access the return value from slot 0 on the stack.
-WrenInterpretResult wrenCall(WrenVM* vm, WrenValue* method);
+DllExport WrenInterpretResult wrenCall(WrenVM* vm, WrenValue* method);
 
 // Releases the reference stored in [value]. After calling this, [value] can no
 // longer be used.
-void wrenReleaseValue(WrenVM* vm, WrenValue* value);
+DllExport void wrenReleaseValue(WrenVM* vm, WrenValue* value);
 
 // The following functions are intended to be called from foreign methods or
 // finalizers. The interface Wren provides to a foreign method is like a
@@ -303,7 +305,7 @@ void wrenReleaseValue(WrenVM* vm, WrenValue* value);
 // return, you get a very fast FFI.
 
 // Returns the number of slots available to the current foreign method.
-int wrenGetSlotCount(WrenVM* vm);
+DllExport int wrenGetSlotCount(WrenVM* vm);
 
 // Ensures that the foreign method stack has at least [numSlots] available for
 // use, growing the stack if needed.
@@ -311,15 +313,15 @@ int wrenGetSlotCount(WrenVM* vm);
 // Does not shrink the stack if it has more than enough slots.
 //
 // It is an error to call this from a finalizer.
-void wrenEnsureSlots(WrenVM* vm, int numSlots);
+DllExport void wrenEnsureSlots(WrenVM* vm, int numSlots);
 
 // Gets the type of the object in [slot].
-WrenType wrenGetSlotType(WrenVM* vm, int slot);
+DllExport WrenType wrenGetSlotType(WrenVM* vm, int slot);
 
 // Reads a boolean value from [slot].
 //
 // It is an error to call this if the slot does not contain a boolean value.
-bool wrenGetSlotBool(WrenVM* vm, int slot);
+DllExport bool wrenGetSlotBool(WrenVM* vm, int slot);
 
 // Reads a byte array from [slot].
 //
@@ -331,19 +333,19 @@ bool wrenGetSlotBool(WrenVM* vm, int slot);
 // number of bytes in the array.
 //
 // It is an error to call this if the slot does not contain a string.
-const char* wrenGetSlotBytes(WrenVM* vm, int slot, int* length);
+DllExport const char* wrenGetSlotBytes(WrenVM* vm, int slot, int* length);
 
 // Reads a number from [slot].
 //
 // It is an error to call this if the slot does not contain a number.
-double wrenGetSlotDouble(WrenVM* vm, int slot);
+DllExport double wrenGetSlotDouble(WrenVM* vm, int slot);
 
 // Reads a foreign object from [slot] and returns a pointer to the foreign data
 // stored with it.
 //
 // It is an error to call this if the slot does not contain an instance of a
 // foreign class.
-void* wrenGetSlotForeign(WrenVM* vm, int slot);
+DllExport void* wrenGetSlotForeign(WrenVM* vm, int slot);
 
 // Reads a string from [slot].
 //
@@ -352,13 +354,13 @@ void* wrenGetSlotForeign(WrenVM* vm, int slot);
 // function returns, since the garbage collector may reclaim it.
 //
 // It is an error to call this if the slot does not contain a string.
-const char* wrenGetSlotString(WrenVM* vm, int slot);
+DllExport const char* wrenGetSlotString(WrenVM* vm, int slot);
 
 // Creates a handle for the value stored in [slot].
 //
 // This will prevent the object that is referred to from being garbage collected
 // until the handle is released by calling [wrenReleaseValue()].
-WrenValue* wrenGetSlotValue(WrenVM* vm, int slot);
+DllExport WrenValue* wrenGetSlotValue(WrenVM* vm, int slot);
 
 // The following functions provide the return value for a foreign method back
 // to Wren. Like above, they may only be called during a foreign call invoked
@@ -370,16 +372,17 @@ WrenValue* wrenGetSlotValue(WrenVM* vm, int slot);
 // arguments after one of these has been called.
 
 // Stores the boolean [value] in [slot].
-void wrenSetSlotBool(WrenVM* vm, int slot, bool value);
+DllExport void wrenSetSlotBool(WrenVM* vm, int slot, bool value);
 
 // Stores the array [length] of [bytes] in [slot].
 //
 // The bytes are copied to a new string within Wren's heap, so you can free
 // memory used by them after this is called.
-void wrenSetSlotBytes(WrenVM* vm, int slot, const char* bytes, size_t length);
+DllExport void wrenSetSlotBytes(
+	WrenVM* vm, int slot, const char* bytes, size_t length);
 
 // Stores the numeric [value] in [slot].
-void wrenSetSlotDouble(WrenVM* vm, int slot, double value);
+DllExport void wrenSetSlotDouble(WrenVM* vm, int slot, double value);
 
 // Creates a new instance of the foreign class stored in [classSlot] with [size]
 // bytes of raw storage and places the resulting object in [slot].
@@ -390,13 +393,14 @@ void wrenSetSlotDouble(WrenVM* vm, int slot, double value);
 // and then the constructor will be invoked when the allocator returns.
 //
 // Returns a pointer to the foreign object's data.
-void* wrenSetSlotNewForeign(WrenVM* vm, int slot, int classSlot, size_t size);
+DllExport void* wrenSetSlotNewForeign(
+	WrenVM* vm, int slot, int classSlot, size_t size);
 
 // Stores a new empty list in [slot].
-void wrenSetSlotNewList(WrenVM* vm, int slot);
+DllExport void wrenSetSlotNewList(WrenVM* vm, int slot);
 
 // Stores null in [slot].
-void wrenSetSlotNull(WrenVM* vm, int slot);
+DllExport void wrenSetSlotNull(WrenVM* vm, int slot);
 
 // Stores the string [text] in [slot].
 //
@@ -404,23 +408,24 @@ void wrenSetSlotNull(WrenVM* vm, int slot);
 // memory used by it after this is called. The length is calculated using
 // [strlen()]. If the string may contain any null bytes in the middle, then you
 // should use [wrenSetSlotBytes()] instead.
-void wrenSetSlotString(WrenVM* vm, int slot, const char* text);
+DllExport void wrenSetSlotString(WrenVM* vm, int slot, const char* text);
 
 // Stores the value captured in [value] in [slot].
 //
 // This does not release the handle for the value.
-void wrenSetSlotValue(WrenVM* vm, int slot, WrenValue* value);
+DllExport void wrenSetSlotValue(WrenVM* vm, int slot, WrenValue* value);
 
 // Takes the value stored at [elementSlot] and inserts it into the list stored
 // at [listSlot] at [index].
 //
 // As in Wren, negative indexes can be used to insert from the end. To append
 // an element, use `-1` for the index.
-void wrenInsertInList(WrenVM* vm, int listSlot, int index, int elementSlot);
+DllExport void wrenInsertInList(
+	WrenVM* vm, int listSlot, int index, int elementSlot);
 
 // Looks up the top level variable with [name] in [module] and stores it in
 // [slot].
-void wrenGetVariable(WrenVM* vm, const char* module, const char* name,
-                     int slot);
+DllExport void wrenGetVariable(
+	WrenVM* vm, const char* module, const char* name, int slot);
 
 #endif
