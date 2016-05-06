@@ -91,7 +91,7 @@ typedef struct
 	// The callback invoked when the foreign object is created.
 	//
 	// This must be provided. Inside the body of this, it must call
-	// [wrenAllocateForeign] exactly once.
+	// [wrenSetSlotNewForeign] exactly once.
 	WrenForeignMethodFn allocate;
 
 	// The callback invoked when the garbage collector is about to collect a
@@ -145,7 +145,7 @@ typedef struct
 	//
 	// When a foreign class is declared, this will be called with the class's
 	// module and name when the class body is executed. It should return the
-	// foreign functions uses to allocate and (optionally) finalize the bytes
+	// foreign functions used to allocate and (optionally) finalize the bytes
 	// stored in the foreign object when an instance is created.
 	WrenBindForeignClassFn bindForeignClassFn;
 
