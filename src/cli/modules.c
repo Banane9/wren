@@ -4,7 +4,7 @@
 #include "modules.h"
 
 #include "io.wren.inc"
-#include "process.wren.inc"
+#include "os.wren.inc"
 #include "scheduler.wren.inc"
 #include "timer.wren.inc"
 
@@ -21,6 +21,8 @@ extern void fileRealPath(WrenVM* vm);
 extern void fileSize(WrenVM* vm);
 extern void fileStat(WrenVM* vm);
 extern void fileWriteBytes(WrenVM* vm);
+extern void platformIsPosix(WrenVM* vm);
+extern void platformName(WrenVM* vm);
 extern void processAllArguments(WrenVM* vm);
 extern void statPath(WrenVM* vm);
 extern void statBlockCount(WrenVM* vm);
@@ -35,6 +37,9 @@ extern void statSpecialDevice(WrenVM* vm);
 extern void statUser(WrenVM* vm);
 extern void statIsDirectory(WrenVM* vm);
 extern void statIsFile(WrenVM* vm);
+extern void stdinIsRaw(WrenVM* vm);
+extern void stdinIsRawSet(WrenVM* vm);
+extern void stdinIsTerminal(WrenVM* vm);
 extern void stdinReadStart(WrenVM* vm);
 extern void stdinReadStop(WrenVM* vm);
 extern void schedulerCaptureMethods(WrenVM* vm);
@@ -141,11 +146,18 @@ static ModuleRegistry modules[] =
       METHOD("isFile", statIsFile)
     END_CLASS
     CLASS(Stdin)
+      STATIC_METHOD("isRaw", stdinIsRaw)
+      STATIC_METHOD("isRaw=(_)", stdinIsRawSet)
+      STATIC_METHOD("isTerminal", stdinIsTerminal)
       STATIC_METHOD("readStart_()", stdinReadStart)
       STATIC_METHOD("readStop_()", stdinReadStop)
     END_CLASS
   END_MODULE
-  MODULE(process)
+  MODULE(os)
+    CLASS(Platform)
+      STATIC_METHOD("isPosix", platformIsPosix)
+      STATIC_METHOD("name", platformName)
+    END_CLASS
     CLASS(Process)
       STATIC_METHOD("allArguments", processAllArguments)
     END_CLASS
