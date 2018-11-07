@@ -100,13 +100,6 @@ struct WrenVM
   Value* apiStack;
 
   WrenConfiguration config;
-  
-  // Compiler and debugger data:
-
-  // The compiler that is currently compiling code. This is used so that heap
-  // allocated objects used by the compiler can be found if a GC is kicked off
-  // in the middle of a compile.
-  Compiler* compiler;
 
   // There is a single global symbol table for all method names on all classes.
   // Method calls are dispatched directly by index in this table.
@@ -140,14 +133,6 @@ WrenHandle* wrenMakeHandle(WrenVM* vm, Value value);
 // Executes [source] in the context of [module].
 WrenInterpretResult wrenInterpretInModule(WrenVM* vm, const char* module,
                                           const char* source);
-
-// Compile [source] in the context of [module] and wrap in a fiber that can
-// execute it.
-//
-// Returns NULL if a compile error occurred.
-ObjClosure* wrenCompileSource(WrenVM* vm, const char* module,
-                              const char* source, bool isExpression,
-                              bool printErrors);
 
 // Looks up a variable from a previously-loaded module.
 //

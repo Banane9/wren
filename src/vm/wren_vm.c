@@ -44,9 +44,9 @@ void wrenInitConfiguration(WrenConfiguration* config)
   config->bindForeignClassFn = NULL;
   config->writeFn = NULL;
   config->errorFn = NULL;
-  config->initialHeapSize = 1024 * 1024 * 10;
-  config->minHeapSize = 1024 * 1024;
-  config->heapGrowthPercent = 50;
+  config->initialHeapSize = 1024;
+  config->minHeapSize = 1024;
+  config->heapGrowthPercent = 10;
   config->userData = NULL;
 }
 
@@ -147,9 +147,6 @@ void wrenCollectGarbage(WrenVM* vm)
   {
     wrenGrayValue(vm, handle->value);
   }
-
-  // Any object the compiler is using (if there is one).
-  if (vm->compiler != NULL) wrenMarkCompiler(vm, vm->compiler);
 
   // Method names.
   wrenBlackenSymbolTable(vm, &vm->methodNames);
