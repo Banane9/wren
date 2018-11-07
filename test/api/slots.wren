@@ -1,10 +1,12 @@
 class Slots {
   foreign static noSet
   foreign static getSlots(bool, num, string, bytes, value)
-  foreign static setSlots(a, b, c, d)
+  foreign static setSlots(a, b, c, d, e)
   foreign static slotTypes(bool, foreignObj, list, nullObj, num, string, unknown)
   foreign static ensure()
   foreign static ensureOutsideForeign()
+  foreign static getListCount(list)
+  foreign static getListElement(list, index)
 }
 
 foreign class ForeignType {
@@ -16,10 +18,10 @@ foreign class ForeignType {
 System.print(Slots.noSet == Slots) // expect: true
 
 var value = ["value"]
-System.print(Slots.getSlots(true, "by\0te", 12.34, "str", value) == value)
+System.print(Slots.getSlots(true, "by\0te", 1.5, "str", value) == value)
 // expect: true
 
-System.print(Slots.setSlots(value, 0, 0, 0) == value)
+System.print(Slots.setSlots(value, 0, 0, 0, 0) == value)
 // expect: true
 
 System.print(Slots.slotTypes(false, ForeignType.new(), [], null, 1.2, "str", 1..2))
@@ -30,3 +32,8 @@ System.print(Slots.ensure())
 
 System.print(Slots.ensureOutsideForeign())
 // expect: 0 -> 20 (190)
+
+var ducks = ["Huey", "Dewey", "Louie"]
+System.print(Slots.getListCount(ducks))      // expect: 3
+System.print(Slots.getListElement(ducks, 0)) // expect: Huey
+System.print(Slots.getListElement(ducks, 1)) // expect: Dewey

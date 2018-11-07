@@ -11,7 +11,7 @@
           &vm->methodNames, name, strlen(name)); \
       Method method; \
       method.type = METHOD_PRIMITIVE; \
-      method.fn.primitive = prim_##function; \
+      method.as.primitive = prim_##function; \
       wrenBindMethod(vm, cls, symbol, method); \
     }
 
@@ -32,7 +32,7 @@
 
 #define RETURN_ERROR(msg) \
     do { \
-      vm->fiber->error = wrenNewString(vm, msg, sizeof(msg) - 1); \
+      vm->fiber->error = wrenNewStringLength(vm, msg, sizeof(msg) - 1); \
       return false; \
     } while (0);
 

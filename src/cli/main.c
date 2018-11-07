@@ -14,16 +14,27 @@ int main(int argc, const char* argv[])
     return 0;
   }
   
+  if (argc == 2 && strcmp(argv[1], "--version") == 0)
+  {
+    printf("wren %s\n", WREN_VERSION_STRING);
+    return 0;
+  }
+  
   osSetArguments(argc, argv);
 
+  WrenInterpretResult result;
   if (argc == 1)
   {
-    runRepl();
+    result = runRepl();
   }
   else
   {
-    runFile(argv[1]);
+    result = runFile(argv[1]);
   }
 
-  return 0;
+  // Exit with an error code if the script failed.
+  if (result == WREN_RESULT_COMPILE_ERROR) return 65; // EX_DATAERR.
+  if (result == WREN_RESULT_RUNTIME_ERROR) return 70; // EX_SOFTWARE.
+  
+  return getExitCode();
 }

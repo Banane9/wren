@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <errno.h>
+#include <float.h>
 #include <math.h>
 #include <string.h>
 #include <time.h>
@@ -52,15 +53,13 @@ DEF_PRIMITIVE(fiber_new)
 {
   if (!validateFn(vm, args[1], "Argument")) return false;
 
-  ObjFiber* newFiber = wrenNewFiber(vm, AS_CLOSURE(args[1]));
-
-  // The compiler expects the first slot of a function to hold the receiver.
-  // Since a fiber's stack is invoked directly, it doesn't have one, so put it
-  // in here.
-  newFiber->stack[0] = NULL_VAL;
-  newFiber->stackTop++;
-
-  RETURN_OBJ(newFiber);
+  ObjClosure* closure = AS_CLOSURE(args[1]);
+  if (closure->fn->arity > 1)
+  {
+    RETURN_ERROR("Function cannot take more than one parameter.");
+  }
+  
+  RETURN_OBJ(wrenNewFiber(vm, closure));
 }
 
 DEF_PRIMITIVE(fiber_abort)
@@ -81,10 +80,22 @@ DEF_PRIMITIVE(fiber_abort)
 static bool runFiber(WrenVM* vm, ObjFiber* fiber, Value* args, bool isCall,
                      bool hasValue, const char* verb)
 {
+
+  if (!IS_NULL(fiber->error))
+  {
+    RETURN_ERROR_FMT("Cannot $ an aborted fiber.", verb);
+  }
+
   if (isCall)
   {
+    // You can't call a called fiber, but you can transfer directly to it,
+    // which is why this check is gated on `isCall`. This way, after resuming a
+    // suspended fiber, it will run and then return to the fiber that called it
+    // and so on.
     if (fiber->caller != NULL) RETURN_ERROR("Fiber has already been called.");
 
+    if (fiber->state == FIBER_ROOT) RETURN_ERROR("Cannot call root fiber.");
+    
     // Remember who ran it.
     fiber->caller = vm->fiber;
   }
@@ -94,19 +105,25 @@ static bool runFiber(WrenVM* vm, ObjFiber* fiber, Value* args, bool isCall,
     RETURN_ERROR_FMT("Cannot $ a finished fiber.", verb);
   }
 
-  if (!IS_NULL(fiber->error))
-  {
-    RETURN_ERROR_FMT("Cannot $ an aborted fiber.", verb);
-  }
-
   // When the calling fiber resumes, we'll store the result of the call in its
   // stack. If the call has two arguments (the fiber and the value), we only
   // need one slot for the result, so discard the other slot now.
   if (hasValue) vm->fiber->stackTop--;
 
-  // If the fiber was paused, make yield() or transfer() return the result.
-  if (fiber->stackTop > fiber->stack)
+  if (fiber->numFrames == 1 &&
+      fiber->frames[0].ip == fiber->frames[0].closure->fn->code.data)
   {
+    // The fiber is being started for the first time. If its function takes a
+    // parameter, bind an argument to it.
+    if (fiber->frames[0].closure->fn->arity == 1)
+    {
+      fiber->stackTop[0] = hasValue ? args[1] : NULL_VAL;
+      fiber->stackTop++;
+    }
+  }
+  else
+  {
+    // The fiber is being resumed, make yield() or transfer() return the result.
     fiber->stackTop[-1] = hasValue ? args[1] : NULL_VAL;
   }
 
@@ -170,7 +187,7 @@ DEF_PRIMITIVE(fiber_try)
   runFiber(vm, AS_FIBER(args[0]), args, true, false, "try");
   
   // If we're switching to a valid fiber to try, remember that we're trying it.
-  if (IS_NULL(vm->fiber->error)) vm->fiber->callerIsTrying = true;
+  if (IS_NULL(vm->fiber->error)) vm->fiber->state = FIBER_TRY;
   return false;
 }
 
@@ -181,7 +198,7 @@ DEF_PRIMITIVE(fiber_yield)
 
   // Unhook this fiber from the one that called it.
   current->caller = NULL;
-  current->callerIsTrying = false;
+  current->state = FIBER_OTHER;
 
   if (vm->fiber != NULL)
   {
@@ -199,7 +216,7 @@ DEF_PRIMITIVE(fiber_yield1)
 
   // Unhook this fiber from the one that called it.
   current->caller = NULL;
-  current->callerIsTrying = false;
+  current->state = FIBER_OTHER;
 
   if (vm->fiber != NULL)
   {
@@ -229,9 +246,64 @@ DEF_PRIMITIVE(fn_arity)
   RETURN_NUM(AS_CLOSURE(args[0])->fn->arity);
 }
 
+static void call(WrenVM* vm, Value* args, int numArgs)
+{
+  // We only care about missing arguments, not extras.
+  if (AS_CLOSURE(args[0])->fn->arity > numArgs)
+  {
+    vm->fiber->error = CONST_STRING(vm, "Function expects more arguments.");
+    return;
+  }
+  
+  // +1 to include the function itself.
+  wrenCallFunction(vm, vm->fiber, AS_CLOSURE(args[0]), numArgs + 1);
+}
+
+#define DEF_FN_CALL(numArgs) \
+    DEF_PRIMITIVE(fn_call##numArgs) \
+    { \
+      call(vm, args, numArgs); \
+      return false; \
+    } \
+
+DEF_FN_CALL(0)
+DEF_FN_CALL(1)
+DEF_FN_CALL(2)
+DEF_FN_CALL(3)
+DEF_FN_CALL(4)
+DEF_FN_CALL(5)
+DEF_FN_CALL(6)
+DEF_FN_CALL(7)
+DEF_FN_CALL(8)
+DEF_FN_CALL(9)
+DEF_FN_CALL(10)
+DEF_FN_CALL(11)
+DEF_FN_CALL(12)
+DEF_FN_CALL(13)
+DEF_FN_CALL(14)
+DEF_FN_CALL(15)
+DEF_FN_CALL(16)
+
 DEF_PRIMITIVE(fn_toString)
 {
   RETURN_VAL(CONST_STRING(vm, "<fn>"));
+}
+
+// Creates a new list of size args[1], with all elements initialized to args[2].
+DEF_PRIMITIVE(list_filled)
+{
+  if (!validateInt(vm, args[1], "Size")) return false;  
+  if (AS_NUM(args[1]) < 0) RETURN_ERROR("Size cannot be negative.");
+  
+  uint32_t size = (uint32_t)AS_NUM(args[1]);
+  ObjList* list = wrenNewList(vm, size);
+  
+  for (uint32_t i = 0; i < size; i++)
+  {
+    list->elements.data[i] = args[2];
+  }
+  
+  RETURN_OBJ(list);
 }
 
 DEF_PRIMITIVE(list_new)
@@ -466,7 +538,7 @@ DEF_PRIMITIVE(map_keyIteratorValue)
   MapEntry* entry = &map->entries[index];
   if (IS_UNDEFINED(entry->key))
   {
-    RETURN_ERROR("Invalid map iterator value.");
+    RETURN_ERROR("Invalid map iterator.");
   }
 
   RETURN_VAL(entry->key);
@@ -481,7 +553,7 @@ DEF_PRIMITIVE(map_valueIteratorValue)
   MapEntry* entry = &map->entries[index];
   if (IS_UNDEFINED(entry->key))
   {
-    RETURN_ERROR("Invalid map iterator value.");
+    RETURN_ERROR("Invalid map iterator.");
   }
 
   RETURN_VAL(entry->value);
@@ -575,9 +647,11 @@ DEF_NUM_FN(ceil,    ceil)
 DEF_NUM_FN(cos,     cos)
 DEF_NUM_FN(floor,   floor)
 DEF_NUM_FN(negate,  -)
+DEF_NUM_FN(round,   round)
 DEF_NUM_FN(sin,     sin)
 DEF_NUM_FN(sqrt,    sqrt)
 DEF_NUM_FN(tan,     tan)
+DEF_NUM_FN(log,     log)
 
 DEF_PRIMITIVE(num_mod)
 {
@@ -626,6 +700,11 @@ DEF_PRIMITIVE(num_atan2)
   RETURN_NUM(atan2(AS_NUM(args[0]), AS_NUM(args[1])));
 }
 
+DEF_PRIMITIVE(num_pow)
+{
+  RETURN_NUM(pow(AS_NUM(args[0]), AS_NUM(args[1])));
+}
+
 DEF_PRIMITIVE(num_fraction)
 {
   double dummy;
@@ -664,6 +743,16 @@ DEF_PRIMITIVE(num_sign)
   {
     RETURN_NUM(0);
   }
+}
+
+DEF_PRIMITIVE(num_largest)
+{
+  RETURN_NUM(DBL_MAX);
+}
+
+DEF_PRIMITIVE(num_smallest)
+{
+  RETURN_NUM(DBL_MIN);
 }
 
 DEF_PRIMITIVE(num_toString)
@@ -869,7 +958,7 @@ DEF_PRIMITIVE(string_contains)
   ObjString* string = AS_STRING(args[0]);
   ObjString* search = AS_STRING(args[1]);
 
-  RETURN_BOOL(wrenStringFind(string, search) != UINT32_MAX);
+  RETURN_BOOL(wrenStringFind(string, search, 0) != UINT32_MAX);
 }
 
 DEF_PRIMITIVE(string_endsWith)
@@ -879,21 +968,34 @@ DEF_PRIMITIVE(string_endsWith)
   ObjString* string = AS_STRING(args[0]);
   ObjString* search = AS_STRING(args[1]);
 
-  // Corner case, if the search string is longer than return false right away.
+  // Edge case: If the search string is longer then return false right away.
   if (search->length > string->length) RETURN_FALSE;
 
   RETURN_BOOL(memcmp(string->value + string->length - search->length,
                      search->value, search->length) == 0);
 }
 
-DEF_PRIMITIVE(string_indexOf)
+DEF_PRIMITIVE(string_indexOf1)
 {
   if (!validateString(vm, args[1], "Argument")) return false;
 
   ObjString* string = AS_STRING(args[0]);
   ObjString* search = AS_STRING(args[1]);
 
-  uint32_t index = wrenStringFind(string, search);
+  uint32_t index = wrenStringFind(string, search, 0);
+  RETURN_NUM(index == UINT32_MAX ? -1 : (int)index);
+}
+
+DEF_PRIMITIVE(string_indexOf2)
+{
+  if (!validateString(vm, args[1], "Argument")) return false;
+
+  ObjString* string = AS_STRING(args[0]);
+  ObjString* search = AS_STRING(args[1]);
+  uint32_t start = validateIndex(vm, args[2], string->length, "Start");
+  if (start == UINT32_MAX) return false;
+  
+  uint32_t index = wrenStringFind(string, search, start);
   RETURN_NUM(index == UINT32_MAX ? -1 : (int)index);
 }
 
@@ -962,7 +1064,7 @@ DEF_PRIMITIVE(string_startsWith)
   ObjString* string = AS_STRING(args[0]);
   ObjString* search = AS_STRING(args[1]);
 
-  // Corner case, if the search string is longer than return false right away.
+  // Edge case: If the search string is longer then return false right away.
   if (search->length > string->length) RETURN_FALSE;
 
   RETURN_BOOL(memcmp(string->value, search->value, search->length) == 0);
@@ -1015,39 +1117,6 @@ DEF_PRIMITIVE(system_gc)
   RETURN_NULL;
 }
 
-DEF_PRIMITIVE(system_getModuleVariable)
-{
-  if (!validateString(vm, args[1], "Module")) return false;
-  if (!validateString(vm, args[2], "Variable")) return false;
-  
-  Value result = wrenGetModuleVariable(vm, args[1], args[2]);
-  if (!IS_NULL(vm->fiber->error)) return false;
-  
-  RETURN_VAL(result);
-}
-
-DEF_PRIMITIVE(system_importModule)
-{
-  if (!validateString(vm, args[1], "Module")) return false;
-  Value result = wrenImportModule(vm, args[1]);
-  if (!IS_NULL(vm->fiber->error)) return false;
-
-  // If we get null, the module is already loaded and there is no work to do.
-  if (IS_NULL(result)) RETURN_NULL;
-  
-  // Otherwise, we should get a fiber that executes the module.
-  ASSERT(IS_FIBER(result), "Should get a fiber to execute.");
-
-  // We have two slots on the stack for this call, but we only need one for the
-  // return value of the fiber we're calling. Discard the other.
-  vm->fiber->stackTop--;
-
-  // Return to this module when that one is done.
-  AS_FIBER(result)->caller = vm->fiber;
-  vm->fiber = AS_FIBER(result);
-  return false;
-}
-
 DEF_PRIMITIVE(system_writeString)
 {
   if (vm->config.writeFn != NULL)
@@ -1061,7 +1130,7 @@ DEF_PRIMITIVE(system_writeString)
 // Creates either the Object or Class class in the core module with [name].
 static ObjClass* defineClass(WrenVM* vm, ObjModule* module, const char* name)
 {
-  ObjString* nameString = AS_STRING(wrenStringFormat(vm, "$", name));
+  ObjString* nameString = AS_STRING(wrenNewString(vm, name));
   wrenPushRoot(vm, (Obj*)nameString);
 
   ObjClass* classObj = wrenNewSingleClass(vm, 0, nameString);
@@ -1070,19 +1139,6 @@ static ObjClass* defineClass(WrenVM* vm, ObjModule* module, const char* name)
 
   wrenPopRoot(vm);
   return classObj;
-}
-
-// Defines one of the overloads of the special "call(...)" method on Fn.
-//
-// These methods have their own unique method type to handle pushing the
-// function onto the callstack and checking its arity.
-static void fnCall(WrenVM* vm, const char* signature)
-{
-  int symbol = wrenSymbolTableEnsure(vm, &vm->methodNames, signature,
-                                     strlen(signature));
-  Method method;
-  method.type = METHOD_FN_CALL;
-  wrenBindMethod(vm, vm->fnClass, symbol, method);
 }
 
 void wrenInitializeCore(WrenVM* vm)
@@ -1148,7 +1204,7 @@ void wrenInitializeCore(WrenVM* vm)
   //   '---------'   '-------------------'            -'
 
   // The rest of the classes can now be defined normally.
-  wrenInterpretInModule(vm, NULL, coreModuleSource);
+  wrenInterpret(vm, NULL, coreModuleSource);
 
   vm->boolClass = AS_CLASS(wrenFindVariable(vm, coreModule, "Bool"));
   PRIMITIVE(vm->boolClass, "toString", bool_toString);
@@ -1174,23 +1230,23 @@ void wrenInitializeCore(WrenVM* vm)
   PRIMITIVE(vm->fnClass->obj.classObj, "new(_)", fn_new);
 
   PRIMITIVE(vm->fnClass, "arity", fn_arity);
-  fnCall(vm, "call()");
-  fnCall(vm, "call(_)");
-  fnCall(vm, "call(_,_)");
-  fnCall(vm, "call(_,_,_)");
-  fnCall(vm, "call(_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
-  fnCall(vm, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)");
+  PRIMITIVE(vm->fnClass, "call()", fn_call0);
+  PRIMITIVE(vm->fnClass, "call(_)", fn_call1);
+  PRIMITIVE(vm->fnClass, "call(_,_)", fn_call2);
+  PRIMITIVE(vm->fnClass, "call(_,_,_)", fn_call3);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_)", fn_call4);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_)", fn_call5);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_)", fn_call6);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_,_)", fn_call7);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_,_,_)", fn_call8);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_,_,_,_)", fn_call9);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_,_,_,_,_)", fn_call10);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_)", fn_call11);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_)", fn_call12);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_)", fn_call13);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_)", fn_call14);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)", fn_call15);
+  PRIMITIVE(vm->fnClass, "call(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)", fn_call16);
   PRIMITIVE(vm->fnClass, "toString", fn_toString);
 
   vm->nullClass = AS_CLASS(wrenFindVariable(vm, coreModule, "Null"));
@@ -1200,6 +1256,8 @@ void wrenInitializeCore(WrenVM* vm)
   vm->numClass = AS_CLASS(wrenFindVariable(vm, coreModule, "Num"));
   PRIMITIVE(vm->numClass->obj.classObj, "fromString(_)", num_fromString);
   PRIMITIVE(vm->numClass->obj.classObj, "pi", num_pi);
+  PRIMITIVE(vm->numClass->obj.classObj, "largest", num_largest);
+  PRIMITIVE(vm->numClass->obj.classObj, "smallest", num_smallest);
   PRIMITIVE(vm->numClass, "-(_)", num_minus);
   PRIMITIVE(vm->numClass, "+(_)", num_plus);
   PRIMITIVE(vm->numClass, "*(_)", num_multiply);
@@ -1221,14 +1279,17 @@ void wrenInitializeCore(WrenVM* vm)
   PRIMITIVE(vm->numClass, "cos", num_cos);
   PRIMITIVE(vm->numClass, "floor", num_floor);
   PRIMITIVE(vm->numClass, "-", num_negate);
+  PRIMITIVE(vm->numClass, "round", num_round);
   PRIMITIVE(vm->numClass, "sin", num_sin);
   PRIMITIVE(vm->numClass, "sqrt", num_sqrt);
   PRIMITIVE(vm->numClass, "tan", num_tan);
+  PRIMITIVE(vm->numClass, "log", num_log);
   PRIMITIVE(vm->numClass, "%(_)", num_mod);
   PRIMITIVE(vm->numClass, "~", num_bitwiseNot);
   PRIMITIVE(vm->numClass, "..(_)", num_dotDot);
   PRIMITIVE(vm->numClass, "...(_)", num_dotDotDot);
   PRIMITIVE(vm->numClass, "atan(_)", num_atan2);
+  PRIMITIVE(vm->numClass, "pow(_)", num_pow);
   PRIMITIVE(vm->numClass, "fraction", num_fraction);
   PRIMITIVE(vm->numClass, "isInfinity", num_isInfinity);
   PRIMITIVE(vm->numClass, "isInteger", num_isInteger);
@@ -1251,7 +1312,8 @@ void wrenInitializeCore(WrenVM* vm)
   PRIMITIVE(vm->stringClass, "codePointAt_(_)", string_codePointAt);
   PRIMITIVE(vm->stringClass, "contains(_)", string_contains);
   PRIMITIVE(vm->stringClass, "endsWith(_)", string_endsWith);
-  PRIMITIVE(vm->stringClass, "indexOf(_)", string_indexOf);
+  PRIMITIVE(vm->stringClass, "indexOf(_)", string_indexOf1);
+  PRIMITIVE(vm->stringClass, "indexOf(_,_)", string_indexOf2);
   PRIMITIVE(vm->stringClass, "iterate(_)", string_iterate);
   PRIMITIVE(vm->stringClass, "iterateByte_(_)", string_iterateByte);
   PRIMITIVE(vm->stringClass, "iteratorValue(_)", string_iteratorValue);
@@ -1259,6 +1321,7 @@ void wrenInitializeCore(WrenVM* vm)
   PRIMITIVE(vm->stringClass, "toString", string_toString);
 
   vm->listClass = AS_CLASS(wrenFindVariable(vm, coreModule, "List"));
+  PRIMITIVE(vm->listClass->obj.classObj, "filled(_,_)", list_filled);
   PRIMITIVE(vm->listClass->obj.classObj, "new()", list_new);
   PRIMITIVE(vm->listClass, "[_]", list_subscript);
   PRIMITIVE(vm->listClass, "[_]=(_)", list_subscriptSetter);
@@ -1280,7 +1343,7 @@ void wrenInitializeCore(WrenVM* vm)
   PRIMITIVE(vm->mapClass, "containsKey(_)", map_containsKey);
   PRIMITIVE(vm->mapClass, "count", map_count);
   PRIMITIVE(vm->mapClass, "remove(_)", map_remove);
-  PRIMITIVE(vm->mapClass, "iterate_(_)", map_iterate);
+  PRIMITIVE(vm->mapClass, "iterate(_)", map_iterate);
   PRIMITIVE(vm->mapClass, "keyIteratorValue_(_)", map_keyIteratorValue);
   PRIMITIVE(vm->mapClass, "valueIteratorValue_(_)", map_valueIteratorValue);
 
@@ -1297,10 +1360,6 @@ void wrenInitializeCore(WrenVM* vm)
   ObjClass* systemClass = AS_CLASS(wrenFindVariable(vm, coreModule, "System"));
   PRIMITIVE(systemClass->obj.classObj, "clock", system_clock);
   PRIMITIVE(systemClass->obj.classObj, "gc()", system_gc);
-  // TODO: Do we want to give these magic names that can't be called from
-  // regular code?
-  PRIMITIVE(systemClass->obj.classObj, "getModuleVariable(_,_)", system_getModuleVariable);
-  PRIMITIVE(systemClass->obj.classObj, "importModule(_)", system_importModule);
   PRIMITIVE(systemClass->obj.classObj, "writeString_(_)", system_writeString);
 
   // While bootstrapping the core types and running the core module, a number

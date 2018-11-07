@@ -10,13 +10,15 @@ void wrenDebugPrintStackTrace(WrenVM* vm)
   ObjFiber* fiber = vm->fiber;
   if (IS_STRING(fiber->error))
   {
-    vm->config.errorFn(WREN_ERROR_RUNTIME, NULL, -1, AS_CSTRING(fiber->error));
+    vm->config.errorFn(vm, WREN_ERROR_RUNTIME,
+                       NULL, -1, AS_CSTRING(fiber->error));
   }
   else
   {
     // TODO: Print something a little useful here. Maybe the name of the error's
     // class?
-    vm->config.errorFn(WREN_ERROR_RUNTIME, NULL, -1, "[error object]");
+    vm->config.errorFn(vm, WREN_ERROR_RUNTIME,
+                       NULL, -1, "[error object]");
   }
 
   for (int i = fiber->numFrames - 1; i >= 0; i--)
@@ -34,7 +36,8 @@ void wrenDebugPrintStackTrace(WrenVM* vm)
     
     // -1 because IP has advanced past the instruction that it just executed.
     int line = fn->debug->sourceLines.data[frame->ip - fn->code.data - 1];
-    vm->config.errorFn(WREN_ERROR_STACK_TRACE, fn->module->name->value, line,
+    vm->config.errorFn(vm, WREN_ERROR_STACK_TRACE,
+                       fn->module->name->value, line,
                        fn->debug->name);
   }
 }
@@ -156,7 +159,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int slot = READ_SHORT();
       printf("%-16s %5d '%s'\n", "LOAD_MODULE_VAR", slot,
-             fn->module->variableNames.data[slot].buffer);
+             fn->module->variableNames.data[slot]->value);
       break;
     }
 
@@ -164,7 +167,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int slot = READ_SHORT();
       printf("%-16s %5d '%s'\n", "STORE_MODULE_VAR", slot,
-             fn->module->variableNames.data[slot].buffer);
+             fn->module->variableNames.data[slot]->value);
       break;
     }
 
@@ -196,7 +199,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
       int numArgs = bytecode[i - 1] - CODE_CALL_0;
       int symbol = READ_SHORT();
       printf("CALL_%-11d %5d '%s'\n", numArgs, symbol,
-             vm->methodNames.data[symbol].buffer);
+             vm->methodNames.data[symbol]->value);
       break;
     }
 
@@ -222,7 +225,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
       int symbol = READ_SHORT();
       int superclass = READ_SHORT();
       printf("SUPER_%-10d %5d '%s' %5d\n", numArgs, symbol,
-             vm->methodNames.data[symbol].buffer, superclass);
+             vm->methodNames.data[symbol]->value, superclass);
       break;
     }
 
@@ -298,7 +301,7 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int symbol = READ_SHORT();
       printf("%-16s %5d '%s'\n", "METHOD_INSTANCE", symbol,
-             vm->methodNames.data[symbol].buffer);
+             vm->methodNames.data[symbol]->value);
       break;
     }
 
@@ -306,10 +309,32 @@ static int dumpInstruction(WrenVM* vm, ObjFn* fn, int i, int* lastLine)
     {
       int symbol = READ_SHORT();
       printf("%-16s %5d '%s'\n", "METHOD_STATIC", symbol,
-             vm->methodNames.data[symbol].buffer);
+             vm->methodNames.data[symbol]->value);
       break;
     }
-
+      
+    case CODE_END_MODULE:
+      printf("END_MODULE\n");
+      break;
+      
+    case CODE_IMPORT_MODULE:
+    {
+      int name = READ_SHORT();
+      printf("%-16s %5d '", "IMPORT_MODULE", name);
+      wrenDumpValue(fn->constants.data[name]);
+      printf("'\n");
+      break;
+    }
+      
+    case CODE_IMPORT_VARIABLE:
+    {
+      int variable = READ_SHORT();
+      printf("%-16s %5d '", "IMPORT_VARIABLE", variable);
+      wrenDumpValue(fn->constants.data[variable]);
+      printf("'\n");
+      break;
+    }
+      
     case CODE_END:
       printf("END\n");
       break;

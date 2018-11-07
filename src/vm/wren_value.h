@@ -2,6 +2,7 @@
 #define wren_value_h
 
 #include <stdbool.h>
+#include <string.h>
 
 #include "wren_common.h"
 #include "wren_utils.h"
@@ -61,7 +62,7 @@
 // These macros promote a primitive C value to a full Wren Value. There are
 // more defined below that are specific to the Nan tagged or other
 // representation.
-#define BOOL_VAL(boolean) (boolean ? TRUE_VAL : FALSE_VAL)      // boolean
+#define BOOL_VAL(boolean) ((boolean) ? TRUE_VAL : FALSE_VAL)    // boolean
 #define NUM_VAL(num) (wrenNumToValue(num))                      // double
 #define OBJ_VAL(obj) (wrenObjectToValue((Obj*)(obj)))           // Any Obj___*
 
@@ -81,7 +82,7 @@
 // Creates a new string object from [text], which should be a bare C string
 // literal. This determines the length of the string automatically at compile
 // time based on the size of the character array (-1 for the terminating '\0').
-#define CONST_STRING(vm, text) wrenNewString((vm), (text), sizeof(text) - 1)
+#define CONST_STRING(vm, text) wrenNewStringLength((vm), (text), sizeof(text) - 1)
 
 // Identifies which specific type a heap-allocated object is.
 typedef enum {
@@ -102,7 +103,8 @@ typedef enum {
 typedef struct sObjClass ObjClass;
 
 // Base struct for all heap-allocated objects.
-typedef struct sObj
+typedef struct sObj Obj;
+struct sObj
 {
   ObjType type;
   bool isDark;
@@ -112,7 +114,7 @@ typedef struct sObj
 
   // The next object in the linked list of all currently allocated objects.
   struct sObj* next;
-} Obj;
+};
 
 #if WREN_NAN_TAGGING
 
@@ -145,7 +147,7 @@ typedef struct
 DECLARE_BUFFER(Value, Value);
 
 // A heap-allocated string object.
-typedef struct
+struct sObjString
 {
   Obj obj;
 
@@ -157,7 +159,7 @@ typedef struct
 
   // Inline array of the string's bytes followed by a null terminator.
   char value[FLEXIBLE_ARRAY];
-} ObjString;
+};
 
 // The dynamically allocated data structure for a variable that has been used
 // by a closure. Whenever a function accesses a variable declared in an
@@ -171,7 +173,7 @@ typedef struct
 // be closed. When that happens, the value gets copied off the stack into the
 // upvalue itself. That way, it can have a longer lifetime than the stack
 // variable.
-typedef struct sUpvalue
+typedef struct sObjUpvalue
 {
   // The object header. Note that upvalues have this because they are garbage
   // collected, but they are not first class Wren objects.
@@ -187,7 +189,7 @@ typedef struct sUpvalue
 
   // Open upvalues are stored in a linked list by the fiber. This points to the
   // next upvalue in that list.
-  struct sUpvalue* next;
+  struct sObjUpvalue* next;
 } ObjUpvalue;
 
 // The type of a primitive function.
@@ -291,6 +293,24 @@ typedef struct
   Value* stackStart;
 } CallFrame;
 
+// Tracks how this fiber has been invoked, aside from the ways that can be
+// detected from the state of other fields in the fiber.
+typedef enum
+{
+  // The fiber is being run from another fiber using a call to `try()`.
+  FIBER_TRY,
+  
+  // The fiber was directly invoked by `runInterpreter()`. This means it's the
+  // initial fiber used by a call to `wrenCall()` or `wrenInterpret()`.
+  FIBER_ROOT,
+  
+  // The fiber is invoked some other way. If [caller] is `NULL` then the fiber
+  // was invoked using `call()`. If [numFrames] is zero, then the fiber has
+  // finished running and is done. If [numFrames] is one and that frame's `ip`
+  // points to the first byte of code, the fiber has not been started yet.
+  FIBER_OTHER,
+} FiberState;
+
 typedef struct sObjFiber
 {
   Obj obj;
@@ -329,10 +349,7 @@ typedef struct sObjFiber
   // error object. Otherwise, it will be null.
   Value error;
   
-  // This will be true if the caller that called this fiber did so using "try".
-  // In that case, if this fiber fails with an error, the error will be given
-  // to the caller.
-  bool callerIsTrying;
+  FiberState state;
 } ObjFiber;
 
 typedef enum
@@ -347,9 +364,6 @@ typedef enum
   // A normal user-defined method.
   METHOD_BLOCK,
   
-  // The special "call(...)" methods on function.
-  METHOD_FN_CALL,
-
   // No method for the given symbol.
   METHOD_NONE
 } MethodType;
@@ -364,10 +378,8 @@ typedef struct
   {
     Primitive primitive;
     WrenForeignMethodFn foreign;
-    
-    // May be a [ObjFn] or [ObjClosure].
-    ObjClosure* obj;
-  } fn;
+    ObjClosure* closure;
+  } as;
 } Method;
 
 DECLARE_BUFFER(Method, Method);
@@ -513,7 +525,7 @@ typedef struct
 // S[NaN      ]1---------------------------------------------------
 //
 // For singleton values, we just enumerate the different values. We'll use the
-// low three bits of the mantissa for that, and only need a couple:
+// low bits of the mantissa for that, and only need a few:
 //
 //                                                 3 Type bits--v
 // 0[NaN      ]1------------------------------------------------[T]
@@ -628,10 +640,6 @@ ObjClosure* wrenNewClosure(WrenVM* vm, ObjFn* fn);
 // Creates a new fiber object that will invoke [closure].
 ObjFiber* wrenNewFiber(WrenVM* vm, ObjClosure* closure);
 
-// Resets [fiber] back to an initial state where it is ready to invoke
-// [closure].
-void wrenResetFiber(WrenVM* vm, ObjFiber* fiber, ObjClosure* closure);
-
 // Adds a new [CallFrame] to [fiber] invoking [closure] whose stack starts at
 // [stackStart].
 static inline void wrenAppendCallFrame(WrenVM* vm, ObjFiber* fiber,
@@ -692,10 +700,15 @@ ObjModule* wrenNewModule(WrenVM* vm, ObjString* name);
 // Creates a new range from [from] to [to].
 Value wrenNewRange(WrenVM* vm, double from, double to, bool isInclusive);
 
+// Creates a new string object and copies [text] into it.
+//
+// [text] must be non-NULL.
+Value wrenNewString(WrenVM* vm, const char* text);
+
 // Creates a new string object of [length] and copies [text] into it.
 //
 // [text] may be NULL if [length] is zero.
-Value wrenNewString(WrenVM* vm, const char* text, size_t length);
+Value wrenNewStringLength(WrenVM* vm, const char* text, size_t length);
 
 // Creates a new string object by taking a range of characters from [source].
 // The range starts at [start], contains [count] bytes, and increments by
@@ -728,7 +741,15 @@ Value wrenStringCodePointAt(WrenVM* vm, ObjString* string, uint32_t index);
 // Search for the first occurence of [needle] within [haystack] and returns its
 // zero-based offset. Returns `UINT32_MAX` if [haystack] does not contain
 // [needle].
-uint32_t wrenStringFind(ObjString* haystack, ObjString* needle);
+uint32_t wrenStringFind(ObjString* haystack, ObjString* needle,
+                        uint32_t startIndex);
+
+// Returns true if [a] and [b] represent the same string.
+static inline bool wrenStringEqualsCString(const ObjString* a,
+                                           const char* b, size_t length)
+{
+  return a->length == length && memcmp(a->value, b, length) == 0;
+}
 
 // Creates a new open upvalue pointing to [value] on the stack.
 ObjUpvalue* wrenNewUpvalue(WrenVM* vm, Value* value);

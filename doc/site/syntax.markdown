@@ -107,23 +107,42 @@ Blocks of this form when used for method and function bodies automatically
 return `null` after the block has completed. If you want to return a different
 value, you need an explicit `return` statement.
 
-However, it's pretty common to have a method or function that just evaluates
-and returns the result of a single expression. For that, Wren has a more
-compact notation:
+However, it's pretty common to have a method or function that just evaluates and
+returns the result of a single expression. Some other languages use `=>` to
+define these. Wren uses:
 
     :::wren
     { "single expression" }
 
 If there is no newline after the `{` (or after the parameter list in a
 [function](functions.html)), then the block may only contain a single
-expression, and it automatically returns the result of it. It's exactly the
-same as doing:
+expression, and it automatically returns the result of it. It's exactly the same
+as doing:
 
     :::wren
     {
       return "single expression"
     }
 
+Statements are not allowed in this form (since they don't produce values), which
+means nothing starting with `class`, `for`, `if`, `import`,  `return`,
+`var`, or `while`. If you want a block that contains a single statement,
+put a newline in there:
+
+    :::wren
+    {
+      if (happy) {
+        System.print("I'm feelin' it!")
+      }
+    }
+
+Using an initial newline after the `{` does feel a little weird or magical, but
+newlines are already significant in Wren, so it's not totally crazy. The nice
+thing about this syntax as opposed to something like `=>` is that the *end* of
+the block has an explicit delimiter. That helps when chaining:
+
+    :::wren
+    numbers.map {|n| n * 2 }.where {|n| n < 100 }
 
 ## Precedence and Associativity
 

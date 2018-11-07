@@ -4,27 +4,12 @@
 #include "uv.h"
 
 #include "scheduler.h"
+#include "stat.h"
 #include "vm.h"
 #include "wren.h"
 
 #include <stdio.h>
 #include <fcntl.h>
-
-// Windows doesn't define all of the Unix permission and mode flags by default,
-// so map them ourselves.
-#if defined(WIN32) || defined(WIN64)
-  #include <sys\stat.h>
-
-  // Map to Windows permission flags.
-  #define S_IRUSR _S_IREAD
-  #define S_IWUSR _S_IWRITE
-
-  #define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
-  #define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
-
-  // Not supported on Windows.
-  #define O_SYNC 0
-#endif
 
 typedef struct sFileRequestData
 {
@@ -54,6 +39,7 @@ static void shutdownStdin()
 {
   if (stdinStream != NULL)
   {
+    uv_tty_reset_mode();
     uv_close((uv_handle_t*)stdinStream, NULL);
     free(stdinStream);
     stdinStream = NULL;
@@ -70,8 +56,6 @@ static void shutdownStdin()
     wrenReleaseHandle(getVM(), stdinOnData);
     stdinOnData = NULL;
   }
-  
-  uv_tty_reset_mode();
 }
 
 void ioShutdown()
@@ -96,11 +80,12 @@ static bool handleRequestError(uv_fs_t* request)
   FileRequestData* data = (FileRequestData*)request->data;
   WrenHandle* fiber = (WrenHandle*)data->fiber;
   
-  schedulerResumeError(fiber, uv_strerror((int)request->result));
-  
+  int error = (int)request->result;
   free(data);
   uv_fs_req_cleanup(request);
   free(request);
+  
+  schedulerResumeError(fiber, uv_strerror(error));
   return true;
 }
 
@@ -543,6 +528,12 @@ void stdinIsTerminal(WrenVM* vm)
 {
   initStdin();
   wrenSetSlotBool(vm, 0, uv_guess_handle(stdinDescriptor) == UV_TTY);
+}
+
+void stdoutFlush(WrenVM* vm)
+{
+  fflush(stdout);
+  wrenSetSlotNull(vm, 0);
 }
 
 static void allocCallback(uv_handle_t* handle, size_t suggestedSize,

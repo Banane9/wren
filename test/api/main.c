@@ -6,12 +6,18 @@
 
 #include "benchmark.h"
 #include "call.h"
+#include "call_wren_call_root.h"
+#include "error.h"
 #include "get_variable.h"
 #include "foreign_class.h"
 #include "handle.h"
 #include "lists.h"
 #include "new_vm.h"
+#include "reset_stack_after_call_abort.h"
+#include "reset_stack_after_foreign_construct.h"
+#include "resolution.h"
 #include "slots.h"
+#include "user_data.h"
 
 // The name of the currently executing API test.
 const char* testName;
@@ -19,8 +25,8 @@ const char* testName;
 static WrenForeignMethodFn bindForeignMethod(
     WrenVM* vm, const char* module, const char* className,
     bool isStatic, const char* signature)
-{  
-  if (strcmp(module, "main") != 0) return NULL;
+{
+  if (strncmp(module, "./test/", 7) != 0) return NULL;
 
   // For convenience, concatenate all of the method qualifiers into a single
   // signature string.
@@ -34,6 +40,9 @@ static WrenForeignMethodFn bindForeignMethod(
   WrenForeignMethodFn method = NULL;
   
   method = benchmarkBindMethod(fullName);
+  if (method != NULL) return method;
+  
+  method = errorBindMethod(fullName);
   if (method != NULL) return method;
 
   method = getVariableBindMethod(fullName);
@@ -51,7 +60,13 @@ static WrenForeignMethodFn bindForeignMethod(
   method = newVMBindMethod(fullName);
   if (method != NULL) return method;
   
+  method = resolutionBindMethod(fullName);
+  if (method != NULL) return method;
+
   method = slotsBindMethod(fullName);
+  if (method != NULL) return method;
+  
+  method = userDataBindMethod(fullName);
   if (method != NULL) return method;
 
   fprintf(stderr,
@@ -64,14 +79,16 @@ static WrenForeignClassMethods bindForeignClass(
     WrenVM* vm, const char* module, const char* className)
 {
   WrenForeignClassMethods methods = { NULL, NULL };
-  if (strcmp(module, "main") != 0) return methods;
+  if (strncmp(module, "./test/", 7) != 0) return methods;
 
   foreignClassBindClass(className, &methods);
   if (methods.allocate != NULL) return methods;
   
-  slotsBindClass(className, &methods);
+  resetStackAfterForeignConstructBindClass(className, &methods);
   if (methods.allocate != NULL) return methods;
   
+  slotsBindClass(className, &methods);
+  if (methods.allocate != NULL) return methods;
   
   fprintf(stderr,
           "Unknown foreign class '%s' for test '%s'\n", className, testName);
@@ -79,8 +96,24 @@ static WrenForeignClassMethods bindForeignClass(
   return methods;
 }
 
-static void afterLoad(WrenVM* vm) {
-  if (strstr(testName, "/call.wren") != NULL) callRunTests(vm);
+static void afterLoad(WrenVM* vm)
+{
+  if (strstr(testName, "/call.wren") != NULL)
+  {
+    callRunTests(vm);
+  }
+  else if (strstr(testName, "/call_wren_call_root.wren") != NULL)
+  {
+    callWrenCallRootRunTests(vm);
+  }
+  else if (strstr(testName, "/reset_stack_after_call_abort.wren") != NULL)
+  {
+    resetStackAfterCallAbortRunTests(vm);
+  }
+  else if (strstr(testName, "/reset_stack_after_foreign_construct.wren") != NULL)
+  {
+    resetStackAfterForeignConstructRunTests(vm);
+  }
 }
 
 int main(int argc, const char* argv[])
@@ -94,5 +127,5 @@ int main(int argc, const char* argv[])
   testName = argv[1];
   setTestCallbacks(bindForeignMethod, bindForeignClass, afterLoad);
   runFile(testName);
-  return 0;
+  return getExitCode();
 }
